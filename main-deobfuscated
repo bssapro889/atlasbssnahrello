@@ -1,7 +1,6 @@
--- made by chris12089
--- edited by nahrello 
+-- made by retarted chris
+-- edited by sexy nahrello 
 
--- fuck you chris ;)
 
 if _G.loading then return end
 _G.loading = true
@@ -589,6 +588,7 @@ local cfg = {
 		tickets = false,
 		maintain = false,
 	},
+	look = { custom = false, r = 0, g = 0, b = 0, background = "", title = "" },
 	toys = {
 		enabled = false,
 		interrupt = true,
@@ -596,6 +596,11 @@ local cfg = {
 		conversions = 2,
 		prog = false,
 		progblender = true,
+		progamulet = false,
+		progamuletreroll = false,
+		progamuletrolls = 5,
+		progamuletcount = 0,
+		progpassive = false,
 		route = false,
 		hiddenstickers = false,
 		meteor = false,
@@ -1109,6 +1114,7 @@ gameApi.Setup = function(api)
 	api.StatModifiers = require(ReplicatedStorage.StatModifiers).Description
 	api.BeeStatMods = require(ReplicatedStorage.BeeStats.BeeStatMods).GetType
 	api.WaxTypes = require(game.ReplicatedStorage.WaxTypes).ByID
+	api.StatTools = require(ReplicatedStorage.StatTools)
 	local activatables = ReplicatedStorage.Activatables
 	api.Hives = require(activatables.Hives).ButtonEffect
 	api.NPCs = require(activatables.NPCs).ButtonEffect
@@ -1427,6 +1433,46 @@ local mobileToggleButton, controls, currentField, position, currentFieldName, ve
 local randomFieldPosition, updateAvailableFields, tracked, watchBalloons, watchClouds, watchDupedTokens, watchStations, watchAlerts, watchFlames, watchFlowers
 local watchBlooms, watchNpcBees, watchRbcMobs, findMeteor
 
+-- Appearance (Config > Appearance): read the saved UI color, background and title from the config
+-- that's about to load, so the window is built with them. uiLook.apply() updates them live.
+local uiLook = { folders = {} }
+
+do
+	local ok, saved = pcall(function()
+		local configFile = "atlas/Preset 1.json"
+
+		if isfile("atlas-" .. localPlayer.Name .. ".json") then
+			configFile = "atlas/" .. readfile("atlas-" .. localPlayer.Name .. ".json")
+		end
+
+		if isfile(configFile) then
+			return HttpService:JSONDecode(readfile(configFile))
+		end
+	end)
+
+	local look = ok and type(saved) == "table" and type(saved.look) == "table" and saved.look or {}
+
+	if look.custom and tonumber(look.r) and tonumber(look.g) and tonumber(look.b) then
+		_G.uicolor = Color3.fromRGB(look.r, look.g, look.b)
+		_G.atlaslookcolor = true
+	elseif _G.atlaslookcolor then
+		_G.uicolor = nil
+		_G.atlaslookcolor = nil
+	end
+
+	if type(look.background) == "string" and look.background ~= "" then
+		_G.background = tonumber(look.background) and "rbxassetid://" .. look.background or look.background
+		_G.atlaslookbackground = true
+	elseif _G.atlaslookbackground then
+		_G.background = nil
+		_G.atlaslookbackground = nil
+	end
+
+	if type(look.title) == "string" and look.title ~= "" then
+		uiLook.title = look.title
+	end
+end
+
 do
 	ScreenGui.ScreenInsets = Enum.ScreenInsets.None
 	ScreenGui.Parent = gethui and gethui() or getService("CoreGui")
@@ -1442,7 +1488,7 @@ do
 	local color_3 = Color3.fromRGB(42, 42, 42)
 	local color_4 = Color3.fromRGB(52, 53, 56)
 	local color_5 = Color3.fromRGB(65, 67, 71)
-	local ImageLabel = _G.background and Instance.new("ImageLabel") or Instance.new("Frame")
+	local ImageLabel = Instance.new("ImageLabel")
 	ImageLabel.Name = "Window"
 	ImageLabel.Active = true
 	ImageLabel.BackgroundColor3 = color_
@@ -1555,7 +1601,8 @@ do
 		end
 	end))
 
-	local title = _G.title and string.find(string.lower(_G.title), "atlas") and not string.find(string.lower(_G.title), "pre") and not string.find(string.lower(_G.title), "paid") and _G.title or "Nahrello's Atlas (UNBLACKLISTED ADDITION)"
+	uiLook.defaultTitle = _G.title and string.find(string.lower(_G.title), "atlas") and not string.find(string.lower(_G.title), "pre") and not string.find(string.lower(_G.title), "paid") and _G.title or "Nahrello's Atlas (UNBLACKLISTED ADDITION)"
+	local title = uiLook.title or uiLook.defaultTitle
 	local uicolor = _G.uicolor and _G.uicolor or Color3.fromRGB(0, 0, 0)
 	local isDesktop = ScreenGui.AbsoluteSize.X >= 850 and ScreenGui.AbsoluteSize.Y >= 500
 
@@ -2236,6 +2283,7 @@ do
 		local clone = uiParts.bar:Clone()
 		local indicator = clone.Indicator
 		clone.Title.Text = title
+		uiLook.titleLabel = clone.Title
 		clone.Parent = ImageLabel
 
 		clone.InputBegan:Connect(function(n)
@@ -2312,8 +2360,83 @@ do
 		end
 	end)
 
+	uiLook.sidebar = { frame = Frame8, transparency = Frame8.BackgroundTransparency }
+
 	if _G.background then
 		Frame8.BackgroundTransparency = 0.5
+	end
+
+	uiLook.apply = function(look)
+		-- UI color: recolor everything currently using the old accent color, then future elements use the new one
+		local newColor = look.custom and Color3.fromRGB(tonumber(look.r) or 0, tonumber(look.g) or 0, tonumber(look.b) or 0) or Color3.fromRGB(0, 0, 0)
+
+		if newColor ~= uicolor then
+			local oldColor = uicolor
+
+			local function recolor(root)
+				if root:IsA("GuiObject") and root.BackgroundColor3 == oldColor then
+					root.BackgroundColor3 = newColor
+				end
+
+				for _, descendant in ipairs(root:GetDescendants()) do
+					if descendant:IsA("GuiObject") and descendant.BackgroundColor3 == oldColor then
+						descendant.BackgroundColor3 = newColor
+					end
+				end
+			end
+
+			recolor(ScreenGui)
+
+			for _, part in pairs(uiParts) do
+				if typeof(part) == "Instance" and not part:IsDescendantOf(ScreenGui) then
+					recolor(part)
+				end
+			end
+
+			uicolor = newColor
+			_G.uicolor = look.custom and newColor or nil
+			_G.atlaslookcolor = look.custom and true or nil
+		end
+
+		-- Background image
+		local background = type(look.background) == "string" and string.gsub(look.background, "%s", "") or ""
+
+		if tonumber(background) then
+			background = "rbxassetid://" .. background
+		end
+
+		if background ~= "" then
+			ImageLabel.Image = background
+			_G.background = background
+			_G.atlaslookbackground = true
+
+			if uiLook.sidebar then
+				uiLook.sidebar.frame.BackgroundTransparency = 0.5
+			end
+
+			for _, folder in ipairs(uiLook.folders) do
+				folder.frame.BackgroundColor3 = color_2
+				folder.frame.BackgroundTransparency = 0.4
+			end
+		else
+			ImageLabel.Image = ""
+			_G.background = nil
+			_G.atlaslookbackground = nil
+
+			if uiLook.sidebar then
+				uiLook.sidebar.frame.BackgroundTransparency = uiLook.sidebar.transparency
+			end
+
+			for _, folder in ipairs(uiLook.folders) do
+				folder.frame.BackgroundColor3 = folder.color
+				folder.frame.BackgroundTransparency = folder.transparency
+			end
+		end
+
+		-- Title bar text
+		if uiLook.titleLabel then
+			uiLook.titleLabel.Text = type(look.title) == "string" and look.title ~= "" and look.title or uiLook.defaultTitle
+		end
 	end
 
 	local Frame10 = Instance.new("Frame")
@@ -2472,6 +2595,7 @@ do
 			local clone4 = uiParts.folder:Clone()
 			local textButton = clone4.TextButton
 			local box = clone4.Box
+			table.insert(uiLook.folders, { frame = clone4, color = clone4.BackgroundColor3, transparency = clone4.BackgroundTransparency })
 
 			if _G.background then
 				clone4.BackgroundColor3 = color_2
@@ -6875,7 +6999,7 @@ local function setJumpPaths(enable)
 end
 
 local tweenTo
-local goTo, goToField, buffs, pickBoostedField, tokenFilter, memoryMatch, handleAmuletPopup, autoStarAmulet, autoMoonAmulet, skipDialog
+local goTo, goToField, buffs, pickBoostedField, tokenFilter, memoryMatch, handleAmuletPopup, autoStarAmulet, autoMoonAmulet, skipDialog, progStarAmulet
 local closePopups, claimHive, autoGiftedBasic, autoMutations, autoRoyalJelly, reportStatus, useToyTimed, farmState, nextMoveTime, tokenPriority
 local patterns, pickTarget, collectObject, collectTarget, farmStep, walkPattern, farmFor, setFacing, equipAccessory, equipCollector
 local getAggroMobs, findPlanter, planterRewards, useItems, doAntChallenge, windShrine, useBlender, useDispensers, bagPercent, shouldConvert
@@ -42335,6 +42459,262 @@ do
 			end
 		end
 
+		-- Auto Progression: generate a Star Amulet from the best unlocked generator tier.
+		-- Bronze-Diamond: a higher tier than the one equipped is always accepted. With "Reroll Star Amulet" on
+		-- and a mod config for the equipped tier, new gifted discoveries trigger a few rerolls (matches only).
+		-- Supreme: you pick the passive(s) you want. It keeps rolling while you have the honey, keeps only an
+		-- amulet with one of those passives, and when honey runs out it returns so normal farming continues.
+		progStarAmulet = function(playerData)
+			if not cfg.toys.progamulet or not playerData then
+				return
+			end
+
+			local tiers = { "Bronze", "Silver", "Gold", "Diamond", "Supreme" }
+			local giftedCount = secureCall(gameApi.StatTools.GetDiscoveredGiftedTypesCount, playerData) or 0
+			local equippedAmulet = playerData.Amulets and playerData.Amulets.Star
+			local equipped = equippedAmulet and equippedAmulet.Type
+			local equippedRank = 0
+
+			for i, tier in ipairs(tiers) do
+				if equipped == tier .. " Star Amulet" then
+					equippedRank = i
+				end
+			end
+
+			local bestRank, generator, nextTier
+
+			for i, tier in ipairs(tiers) do
+				local toy = workspace.Toys:FindFirstChild(tier .. " Star Amulet Generator")
+				local giftedReq = toy and toy:FindFirstChild("GiftedReq")
+
+				if giftedReq then
+					if giftedCount >= giftedReq.Value then
+						bestRank, generator = i, toy
+					elseif not nextTier then
+						nextTier = tier .. " at " .. giftedReq.Value
+					end
+				end
+			end
+
+			local function setStatus(text)
+				if controls["Star Amulet Status"] then
+					controls["Star Amulet Status"].Text = "Star amulet: " .. text
+				end
+			end
+
+			setStatus((equipped or "none") .. (nextTier and (" | next: " .. nextTier) or ""))
+
+			if not bestRank then
+				return
+			end
+
+			local tierName = tiers[bestRank]
+			local amuletTitle = tierName .. " Star Amulet"
+			local wantedPassives = {}
+
+			if tierName == "Supreme" and type(cfg.toys.progpassive) == "table" then
+				for passive, selected in pairs(cfg.toys.progpassive) do
+					if selected then
+						table.insert(wantedPassives, passive)
+					end
+				end
+			end
+
+			local function hasWantedPassive(passives)
+				for _, wanted in ipairs(wantedPassives) do
+					if passives[wanted] then
+						return wanted
+					end
+				end
+			end
+
+			local mode
+
+			if tierName == "Supreme" then
+				if #wantedPassives == 0 then
+					setStatus((equipped or "none") .. " | select a Supreme passive")
+					return
+				end
+
+				local equippedPassives = {}
+
+				if equippedRank == 5 then
+					for _, mod in ipairs(equippedAmulet.Mods or {}) do
+						if mod.Type == "PlayerAbility" and mod.Params and mod.Params.Ability then
+							equippedPassives[mod.Params.Ability] = true
+						end
+					end
+
+					local found = hasWantedPassive(equippedPassives)
+
+					if found then
+						setStatus("Supreme with " .. found .. " (done)")
+						return
+					end
+				end
+
+				mode = "passive"
+			elseif bestRank > equippedRank then
+				mode = "upgrade"
+			elseif bestRank == equippedRank and cfg.toys.progamuletreroll and cfg.amulet.star3 == tierName and type(cfg.amulet.star4) == "table" and next(cfg.amulet.star4) ~= nil and (cfg.toys.progamuletcount or 0) < giftedCount then
+				mode = "reroll"
+			else
+				return
+			end
+
+			local cost = generator.CostAmount.Value
+
+			if localPlayer.CoreStats.Honey.Value < cost then
+				if mode == "passive" then
+					setStatus("saving for Supreme roll (" .. formatNumber(cost) .. " honey)")
+				end
+				return
+			end
+
+			local rewardsPopUp = localPlayer.PlayerGui.ScreenGui.RewardsPopUp
+			local activateButton = gameGui.ActivateButton
+
+			local function closePopup(accept)
+				local deadline = os.clock() + 5
+
+				if accept then
+					local questionBox = localPlayer.PlayerGui.ScreenGui.QuestionBox
+
+					while rewardsPopUp.Visible and not questionBox.Visible and os.clock() < deadline do
+						input:pressButton(rewardsPopUp.YesButton, true, true)
+					end
+
+					while questionBox.Visible and os.clock() < deadline do
+						input:pressButton(questionBox.Box.YesButton, true, true)
+					end
+				else
+					while rewardsPopUp.Visible and os.clock() < deadline do
+						input:pressButton(rewardsPopUp.NoButton, true, true)
+					end
+				end
+			end
+
+			local function popupPassives()
+				local passives = {}
+
+				for line in string.gmatch(rewardsPopUp.AmuletFrame.InfoNew.Text, "[^\r\n]+") do
+					local passive = string.match(line, "Passive:%s*(.-)%s*$")
+
+					if passive then
+						passive = string.gsub(passive, "<[^>]+>", "")
+						passives[passive] = true
+					end
+				end
+
+				return passives
+			end
+
+			local function generateOnce()
+				if localPlayer.CoreStats.Honey.Value < cost then
+					return
+				end
+
+				if distanceTo(generator.Platform.Position, true) > 10 then
+					goTo(generator.Platform.Position, generator.Name)
+				end
+
+				local now = os.clock()
+
+				while activateButton.BackgroundColor3 ~= Color3.fromRGB(50, 131, 255) and os.clock() - now < 2 do
+					RunService.Heartbeat:Wait()
+				end
+
+				secureCall(gameApi.Toys, localPlayer, generator)
+
+				if tierName == "Supreme" and localPlayer.CoreStats.Honey.Value > 5e11 then
+					input:questionBox(cfg.misc.rolldouble, 2)
+				end
+
+				now = os.clock()
+
+				while not rewardsPopUp.Visible and os.clock() - now < 3 do
+					RunService.Heartbeat:Wait()
+				end
+
+				task.wait(0.5)
+				return rewardsPopUp.Visible and string.find(rewardsPopUp.AmuletFrame.Title.Text, "Star Amulet", 1, true) ~= nil
+			end
+
+			if mode == "upgrade" then
+				logger.log("Auto Progression: Upgrading Star Amulet to", amuletTitle, "(" .. giftedCount .. " gifted types)")
+
+				if not generateOnce() then
+					logger.warn("Auto Progression: Failed to generate", amuletTitle)
+					closePopup(false)
+					return
+				end
+
+				closePopup(true)
+				cfg.toys.progamuletcount = giftedCount
+				saveConfig()
+
+				if not state.disconnect and not (not cfg.webhook.enabled or cfg.webhook.url == "") then
+					discord.Send("Atlas Progression", "Equipped " .. amuletTitle .. " (" .. giftedCount .. " gifted types)\nTimestamp: <t:" .. os.time() .. ":R>")
+				end
+			elseif mode == "passive" then
+				logger.log("Auto Progression: Rolling Supreme Star Amulet for", table.concat(wantedPassives, " / "))
+				local rolls = 0
+
+				-- Cap per pass so the rest of progression still gets a turn; the next pass picks up where this left off.
+				while rolls < 25 and localPlayer.CoreStats.Honey.Value >= cost do
+					if not generateOnce() then
+						closePopup(false)
+						break
+					end
+
+					rolls += 1
+					local found = hasWantedPassive(popupPassives())
+
+					if found then
+						logger.log("Auto Progression: Got Supreme Star Amulet with", found, "after", rolls, "roll(s)")
+						closePopup(true)
+
+						if not state.disconnect and not (not cfg.webhook.enabled or cfg.webhook.url == "") then
+							discord.Send("Atlas Progression", "Equipped Supreme Star Amulet with " .. found .. "\nTimestamp: <t:" .. os.time() .. ":R>")
+						end
+
+						setStatus("Supreme with " .. found .. " (done)")
+						break
+					end
+
+					closePopup(false)
+					setStatus("rolling Supreme for " .. table.concat(wantedPassives, " / ") .. " (" .. rolls .. " this session)")
+				end
+
+				if localPlayer.CoreStats.Honey.Value < cost then
+					logger.log("Auto Progression: Out of honey for Supreme rolls, back to farming")
+				end
+			else
+				local rolls = math.max(1, tonumber(cfg.toys.progamuletrolls) or 5)
+				logger.log("Auto Progression: Rerolling", amuletTitle, "for new gifted types (up to", rolls, "rolls)")
+
+				for i = 1, rolls do
+					if not generateOnce() then
+						closePopup(false)
+						break
+					end
+
+					if amuletMatches(cfg.amulet.star4, rewardsPopUp.AmuletFrame.Title.Text) then
+						logger.log("Auto Progression: Found a better", amuletTitle)
+						closePopup(true)
+						break
+					end
+
+					closePopup(false)
+				end
+
+				cfg.toys.progamuletcount = giftedCount
+				saveConfig()
+			end
+
+			gameApi:CacheUpdate()
+		end
+
 		autoMoonAmulet = function()
 			local finished = nil
 
@@ -53829,9 +54209,8 @@ Content-Disposition: form-data; name="file[0]"; filename="image.png"
 				end
 			end
 
-			local v147, v148, v149
 
-			for _, missingIngredient in v147, v148, v149 do
+			for _, missingIngredient in ipairs(missingIngredients) do
 				if cfg.toys.progblender then
 					logger.log(logPrefix, "Crafting x" .. count, recipe)
 					logger.log(logPrefix, "Missing x" .. missingIngredient.Amount, missingIngredient.Type)
@@ -62417,104 +62796,96 @@ do
 				"PlentyPlanter",
 			},
 		},
-		HatchEgg = function()
-			local honeycomb, v135
+		HatchEgg = function(progression, honeycomb, eggType)
+			honeycomb = honeycomb or {}
+			eggType = eggType or "Basic"
 
-			for k in pairs(honeycomb) do
-				v135 = nil
-				break
+			local function occupied(x, y)
+				local column = honeycomb["x" .. x]
+				return column ~= nil and column["y" .. y] ~= nil
 			end
 
-			local eggType, progression
+			local function usable(x, y)
+				local cell = state.hive.Cells:FindFirstChild("C" .. x .. "," .. y)
+				return cell ~= nil and not cell.CellLocked.Value and not occupied(x, y)
+			end
 
-			if not v135 then
-				local emptyCell
+			local targetCell
 
-				for i = 1, 10 do
-					for i2 = 1, 5 do
-						local hiveColumn = honeycomb["x" .. i2]
-						local isAdjacent = false
+			if next(honeycomb) == nil then
+				targetCell = { 1, 1 }
+			else
+				-- Prefer a free, unlocked cell next to an existing bee; fall back to any free, unlocked cell.
+				for y = 1, 10 do
+					for x = 1, 5 do
+						if usable(x, y) and (occupied(x, y - 1) or occupied(x, y + 1) or occupied(x - 1, y) or occupied(x + 1, y)) then
+							targetCell = { x, y }
+							break
+						end
+					end
+					if targetCell then
+						break
+					end
+				end
 
-						if not hiveColumn or not hiveColumn["y" .. i] and not state.hive.Cells["C" .. i2 .. "," .. i].CellLocked.Value then
-							for i3 = -1, 1, 2 do
-								if not ((not hiveColumn or not hiveColumn["y" .. i + i3]) and (not (i2 < 5) or not honeycomb["x" .. i2 + 1] or not honeycomb["x" .. i2 + 1]["y" .. i]) and not (not not (i2 > 1) and not (not honeycomb["x" .. i2 - 1] or not honeycomb["x" .. i2 - 1]["y" .. i]))) then
-									isAdjacent = true
-									break
-								end
-							end
-
-							if isAdjacent then
-								emptyCell = { i2, i }
+				if not targetCell then
+					for y = 1, 10 do
+						for x = 1, 5 do
+							if usable(x, y) then
+								targetCell = { x, y }
 								break
 							end
 						end
-					end
-
-					if emptyCell then
-						logger.log("Hatching", eggType, "Bee at cell", emptyCell[1] .. ",", emptyCell[2])
-
-						if distanceTo(localPlayer.SpawnPos.Value.Position, true) > 9 then
-							goTo(localPlayer.SpawnPos.Value.Position, "Hive")
-							task.wait(0.5)
-						end
-
-						local eggName = eggType == "Basic" and eggType or eggType .. "Bee"
-						local ConstructHiveCellFromEgg, hatchOk, newHoneycomb, discoveredBees, eggUses = gameApi:Event("ConstructHiveCellFromEgg", emptyCell[1], emptyCell[2], eggName, 1, false)
-
-						if not hatchOk then
-							logger.warn("Failed to hatch", eggType, "Bee Egg")
-							error("return", 0)
-						else
-							gameApi:CacheSet({ "Eggs", eggName }, ConstructHiveCellFromEgg)
-							gameApi:CacheSet("Honeycomb", newHoneycomb)
-							gameApi:CacheSet("DiscoveredBees", discoveredBees)
-							gameApi:CacheSet({ "Totals", "EggUses" }, eggUses)
-							secureCall(gameApi.GateManager)
-							local bees = state.bees
-							claimHive()
-							updateAvailableFields(true)
-
-							if not (bees < 15) or not (state.bees >= 15) then
-								if not (not (bees < 5) or not (state.bees >= 5)) then
-									controls.bestbluefield.Set("Bamboo Field")
-									controls.bestredfield.Set("Strawberry Field")
-									controls.bestwhitefield.Set("Spider Field")
-								end
-							else
-								controls.bestbluefield.Set("Pine Tree Forest")
-								controls.bestredfield.Set("Rose Field")
-							end
-
-							progression.time = nil
-							task.wait(0.25)
-							error("return", 0)
+						if targetCell then
+							break
 						end
 					end
-				end
-			else
-				logger.log("Hatching", eggType, "Bee at cell 1, 1")
-
-				if distanceTo(localPlayer.SpawnPos.Value.Position, true) > 9 then
-					goTo(localPlayer.SpawnPos.Value.Position, "Hive")
-					task.wait(0.5)
-				end
-
-				local eggName = eggType == "Basic" and eggType or eggType .. "Bee"
-				local ConstructHiveCellFromEgg, hatchOk, newHoneycomb, discoveredBees, eggUses = gameApi:Event("ConstructHiveCellFromEgg", 1, 1, eggName, 1, false)
-
-				if not hatchOk then
-					logger.warn("Failed to hatch", eggType, "Bee Egg")
-					error("return", 0)
-				else
-					gameApi:CacheSet({ "Eggs", eggName }, ConstructHiveCellFromEgg)
-					gameApi:CacheSet("Honeycomb", newHoneycomb)
-					gameApi:CacheSet("DiscoveredBees", discoveredBees)
-					gameApi:CacheSet({ "Totals", "EggUses" }, eggUses)
-					progression.time = nil
-					task.wait(0.25)
-					error("return", 0)
 				end
 			end
+
+			if not targetCell then
+				logger.warn("No free hive cell to hatch", eggType, "Bee")
+				error("return", 0)
+			end
+
+			logger.log("Hatching", eggType, "Bee at cell", targetCell[1] .. ",", targetCell[2])
+
+			if distanceTo(localPlayer.SpawnPos.Value.Position, true) > 9 then
+				goTo(localPlayer.SpawnPos.Value.Position, "Hive")
+				task.wait(0.5)
+			end
+
+			local eggName = eggType == "Basic" and eggType or eggType .. "Bee"
+			local eggsLeft, hatchOk, newHoneycomb, discoveredBees, eggUses = gameApi:Event("ConstructHiveCellFromEgg", targetCell[1], targetCell[2], eggName, 1, false)
+
+			if not hatchOk then
+				logger.warn("Failed to hatch", eggType, "Bee Egg")
+				error("return", 0)
+			end
+
+			gameApi:CacheSet({ "Eggs", eggName }, eggsLeft)
+			gameApi:CacheSet("Honeycomb", newHoneycomb)
+			gameApi:CacheSet("DiscoveredBees", discoveredBees)
+			gameApi:CacheSet({ "Totals", "EggUses" }, eggUses)
+			inventory.time[eggType == "Basic" and "Basic Egg" or eggName] = nil
+			secureCall(gameApi.GateManager)
+
+			local beesBefore = state.bees
+			claimHive()
+			updateAvailableFields(true)
+
+			if beesBefore < 15 and state.bees >= 15 then
+				controls.bestbluefield.Set("Pine Tree Forest")
+				controls.bestredfield.Set("Rose Field")
+			elseif beesBefore < 5 and state.bees >= 5 then
+				controls.bestbluefield.Set("Bamboo Field")
+				controls.bestredfield.Set("Strawberry Field")
+				controls.bestwhitefield.Set("Spider Field")
+			end
+
+			progression.time = nil
+			task.wait(0.25)
+			error("return", 0)
 		end,
 		Handle = function(progression)
 			if progression.time then
@@ -62678,17 +63049,19 @@ do
 			local ipairs_2 = ipairs
 			local route2 = cfg.toys.route or progression.default
 
+			local routeBlocked = false -- set once a purchase step isn't finished; later purchases wait
+
 			for _, routeItem in ipairs_2(route2) do
-				if not (routeItem.Type ~= "Present" or not (playerData.Eggs.Present > 0)) then
+				if not (routeItem.Type ~= "Present" or not ((playerData.Eggs.Present or 0) > 0)) then
 					local ipairs_3 = ipairs
 					local data2 = type(routeItem.Data) == "table" and routeItem.Data or { routeItem.Data }
 
 					for _, label in ipairs_3(data2) do
-						if playerData.Eggs.Present > 0 and (label == "Brown Bear" or label == "Black Bear" or label == "Mother Bear" or not ((label ~= "Spirit Bear" or state.bees ~= 35) and (label ~= "Onett" or not (state.bees >= 30)) and not ((label == "Polar Bear" or label == "Honey Bee") and state.bees >= 15 or not ((label ~= "Dapper Bear" or not (not not (state.bees >= 10) and dapperShopOpen)) and (label ~= "Riley Bee" or not (not not (state.bees >= 15) and state.redhq)) and (label ~= "Bucko Bee" or not state.bluehq) and (label ~= "Science Bear" or not (state.bees >= 10)) and (label ~= "Panda Bear" or not (state.bees >= 5)))))) then
+						if (playerData.Eggs.Present or 0) > 0 and (label == "Brown Bear" or label == "Black Bear" or label == "Mother Bear" or not ((label ~= "Spirit Bear" or state.bees ~= 35) and (label ~= "Onett" or not (state.bees >= 30)) and not ((label == "Polar Bear" or label == "Honey Bee") and state.bees >= 15 or not ((label ~= "Dapper Bear" or not (not not (state.bees >= 10) and dapperShopOpen)) and (label ~= "Riley Bee" or not (not not (state.bees >= 15) and state.redhq)) and (label ~= "Bucko Bee" or not state.bluehq) and (label ~= "Science Bear" or not (state.bees >= 10)) and (label ~= "Panda Bear" or not (state.bees >= 5)))))) then
 							local alreadyDelivered = true
 
 							if label == "Robo Bear" or label == "Bucko Bee" or label == "Riley Bee" then
-								for _, completedQuest in ipairs(playerData.Quests.Completed) do
+								for _, completedQuest in ipairs(playerData.Quests and playerData.Quests.Completed or {}) do
 									if string.gsub(label, " ", "") .. "Xmas25" == completedQuest then
 										alreadyDelivered = nil
 										break
@@ -62699,7 +63072,7 @@ do
 							end
 
 							if not alreadyDelivered then
-								for _, playerFlag in ipairs(playerData.Flags) do
+								for _, playerFlag in ipairs(playerData.Flags or {}) do
 									if label .. "Xmas2025" == playerFlag then
 										alreadyDelivered = true
 										break
@@ -62788,7 +63161,16 @@ do
 						end
 					end
 				elseif routeItem.Type ~= "Event Bee" then
-					if not (routeItem.Type ~= "Purchase" or not (not routeItem.Bees or not not (routeItem.Bees <= state.bees))) then
+					if routeItem.Type == "Purchase" and routeBlocked then
+						-- an earlier purchase step in the route isn't finished yet, so don't skip ahead
+					elseif routeItem.Type == "Purchase" and routeItem.Bees and routeItem.Bees > state.bees then
+						routeBlocked = true
+
+						if controls["Next Item"] then
+							local waitingItem = type(routeItem.Data) == "table" and routeItem.Data[#routeItem.Data] or routeItem.Data
+							controls["Next Item"].Text = "Next item: " .. tostring(waitingItem) .. " (needs " .. routeItem.Bees .. " bees)"
+						end
+					elseif routeItem.Type == "Purchase" then
 						local data2 = type(routeItem.Data) == "table" and routeItem.Data or { routeItem.Data }
 
 						for i = #data2, 1, -1 do
@@ -62834,7 +63216,7 @@ do
 								local ipairs_3 = ipairs
 								local inventoryKey = itemCategory == "Accessory" and "Accessories" or itemCategory .. "s"
 
-								for _, ownedItem in ipairs_3(playerData[inventoryKey]) do
+								for _, ownedItem in ipairs_3(playerData[inventoryKey] or {}) do
 									local ownedItemIndex = table.find(itemList, ownedItem)
 
 									if not (not ownedItemIndex or not (not ownedIndex or ownedIndex < ownedItemIndex)) then
@@ -62847,9 +63229,17 @@ do
 								end
 							else
 								for i2, eggType in ipairs(itemList) do
-									if not (not playerData.Totals.Purchases.Eggs[eggType] and not playerData.Totals.EggsReceived[eggType]) then
+									if not (not (playerData.Totals.Purchases.Eggs or {})[eggType] and not (playerData.Totals.EggsReceived or {})[eggType]) then
 										ownedIndex = i2
 									end
+								end
+							end
+
+							if not ownedIndex or ownedIndex < itemIndex then
+								routeBlocked = true
+
+								if controls["Next Item"] then
+									controls["Next Item"].Text = "Next item: " .. nextItem
 								end
 							end
 
@@ -62878,6 +63268,12 @@ do
 								end
 
 								local itemCost = secureCall(gameApi.ItemPackages.GetCost, itemPackage, playerData)
+
+								if not itemCost then
+									logger.warn("Auto Progression: No price found for", nextItem)
+									continue
+								end
+
 								local value = localPlayer.CoreStats.Honey.Value
 								local canAfford = true
 								local ipairs_3 = ipairs
@@ -62952,11 +63348,15 @@ do
 						end
 					end
 				else
+					if routeBlocked then
+						continue
+					end
+
 					local ipairs_3 = ipairs
 					local data2 = type(routeItem.Data) == "table" and routeItem.Data or { routeItem.Data }
 
 					for _, eventBee in ipairs_3(data2) do
-						if not playerData.Totals.Purchases.Eggs[eventBee .. "Bee"] and not playerData.Totals.EggsReceived[eventBee .. "Bee"] and remoteData.event[eventBee] then
+						if not (playerData.Totals.Purchases.Eggs or {})[eventBee .. "Bee"] and not (playerData.Totals.EggsReceived or {})[eventBee .. "Bee"] and remoteData.event[eventBee] then
 							local purchasePackage, stinger, label, claimerToy, claimerText, claimerStatus, now, activateButton
 
 							if eventBee ~= "Gummy" then
@@ -63124,6 +63524,18 @@ do
 				end
 			end
 
+			if not routeBlocked and controls["Next Item"] then
+				controls["Next Item"].Text = "Next item: route complete"
+			end
+
+			if cfg.toys.progamulet and progStarAmulet then
+				local amuletOk, amuletErr = pcall(progStarAmulet, gameApi:Cache())
+
+				if not amuletOk and amuletErr ~= "return" then
+					logger.warn("Star Amulet upgrade:", amuletErr)
+				end
+			end
+
 			if not badgeGateOpen then
 			else
 				local ok = not getTimer("Blender")
@@ -63134,7 +63546,7 @@ do
 				end
 
 				if ok then
-					for i = #blenderQueue, 1, -1 do
+					for i = 1, #blenderQueue do
 						if not (not getTimer("Blender") or not (os.time() < getTimer("Blender"))) then
 							return
 						end
@@ -63213,6 +63625,10 @@ do
 
 		local autofarm = cfg.autofarm
 		local toys = cfg.toys
+
+		if toys.prog and not toys.enabled and controls["Next Item"] then
+			controls["Next Item"].Text = "Next item: ? (turn on the Toys switch)"
+		end
 
 		if (not autofarm.autopopstar or not buffs["Pop Star Aura"] and not buffs["Tidal Surge"]) and (not autofarm.autoscorchingstar or not buffs["Scorching Star Aura"]) and (not autofarm.autogummystar or not buffs["Gummy Star Aura"]) then
 			if not (not autofarm.farmfireflies or not (Lighting.ClockTime >= 19 or not not (Lighting.ClockTime <= 5))) then
@@ -63440,9 +63856,8 @@ do
 				end
 
 				if not (not cfg.planters.enabled or cfg.planters.method ~= "Nectar" or not cfg.planters.nectar.farmfield) then
-					local v136, v137, v138
 
-					for _, v139 in v136, v137, v138 do
+					for _, v139 in ipairs(tracked.planters) do
 						setField(v139.field)
 						break
 					end
@@ -65655,6 +66070,10 @@ which bees and get all 3 targets if
 			controls["Hive Slot"] = Progression.AddLabel("Next hive slot: 0?")
 			controls["Auto Progression"] = Progression.AddSwitch("Auto Progression", nil, "toys", "prog")
 			Progression.AddSwitch("Show Blender Messages", nil, "toys", "progblender")
+			controls["Star Amulet Status"] = Progression.AddLabel("Star amulet: ?")
+			Progression.AddSwitch("Upgrade Star Amulet", nil, "toys", "progamulet", { Tooltip = "Generates and equips a Star Amulet each time\na higher generator tier unlocks" })
+			Progression.AddSwitch("Reroll Star Amulet", nil, "toys", "progamuletreroll", { Tooltip = "After each new gifted type, rerolls the current tier\nand keeps an amulet only if it matches your\nAuto Star Amulet mod config for that tier" })
+			Progression.AddDropdown("Supreme Passive", { "Pop Star", "Scorching Star", "Gummy Star", "Guiding Star", "Star Shower", "Star Saw" }, nil, nil, "toys", "progpassive", { Multiple = true })
 
 			Progression.AddTextBox("Import Route", function(routeText)
 				if routeText == "" or not string.find(routeText, "{") or not string.find(routeText, "}") then
@@ -66510,6 +66929,51 @@ more accurate dodging]],
 				local config = controls.config
 				local Movement = config.AddFolder("Movement")
 				local Settings = config.AddFolder("Settings", true)
+
+				do
+					local Appearance = config.AddFolder("Appearance")
+					Appearance.AddLabel("UI color (RGB) - saves to this config")
+
+					local function colorChanged()
+						cfg.look.custom = true
+						saveConfig()
+						uiLook.apply(cfg.look)
+					end
+
+					Appearance.AddSlider("Red", colorChanged, 0, 255, "look", "r")
+					Appearance.AddSlider("Green", colorChanged, 0, 255, "look", "g")
+					Appearance.AddSlider("Blue", colorChanged, 0, 255, "look", "b")
+
+					Appearance.AddTextBox("Background Image ID", function(text)
+						text = string.gsub(text, "%s", "")
+
+						if tonumber(text) then
+							text = "rbxassetid://" .. text
+						end
+
+						cfg.look.background = text
+						saveConfig()
+						uiLook.apply(cfg.look)
+						ui.Notify("Appearance", text == "" and "Background removed" or "Background set to " .. text)
+					end, cfg.look.background ~= "" and cfg.look.background or nil, true)
+
+					Appearance.AddTextBox("Title Bar Text", function(text)
+						cfg.look.title = text
+						saveConfig()
+						uiLook.apply(cfg.look)
+					end, cfg.look.title ~= "" and cfg.look.title or nil, true)
+
+					Appearance.AddButton("Reset Appearance", function()
+						cfg.look.custom = false
+						cfg.look.r, cfg.look.g, cfg.look.b = 0, 0, 0
+						cfg.look.background = ""
+						cfg.look.title = ""
+						saveConfig()
+						uiLook.apply(cfg.look)
+						ui.Notify("Appearance", "Reset to default (sliders update after reloading)")
+					end, 120)
+				end
+
 				local cannonSwitch = nil
 				local jumpSwitch = nil
 				local tweenSpeedSlider = nil
@@ -66760,7 +67224,24 @@ more accurate dodging]],
 					else
 						writefile("atlas-" .. localPlayer.Name .. ".json", config2 .. ".json")
 						task.wait(0.1)
-						loadstring(game:HttpGet(getUrl("script.lua")))()
+
+						-- Reload THIS edited script from a local file instead of downloading the original from GitHub
+						-- (the original refuses to run for blacklisted accounts and freezes the game).
+						local localScript = type(_G.atlaspath) == "string" and isfile(_G.atlaspath) and _G.atlaspath or isfile("atlas/script.lua") and "atlas/script.lua" or nil
+
+						if not localScript then
+							ui.Notify("Config", "Selected " .. config2 .. ". Re-execute the script to load it.")
+							return
+						end
+
+						local chunk, loadError = loadstring(readfile(localScript))
+
+						if not chunk then
+							ui.Notify("Config", "Couldn't load " .. localScript .. ": " .. tostring(loadError))
+							return
+						end
+
+						chunk()
 					end
 				end, 86)
 
