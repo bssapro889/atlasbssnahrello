@@ -1,4 +1,4 @@
--- made by retarted chris
+-- made by retarded chris
 -- edited by sexy nahrello 
 
 
@@ -31,7 +31,7 @@ while not localPlayer.PlayerGui:FindFirstChild("LoadingScreenGui") or localPlaye
 end
 
 local userIdFlags = {
-	[8549774025] = false,
+	[0] = false,
 }
 
 local function getUrl(fileName, v5)
@@ -45,7 +45,7 @@ local function getUrl(fileName, v5)
 	if not v5 then
 		return _G.weburl and _G.weburl .. "/" .. fileName or "https://chris12089.github.io/atlas/" .. fileName
 	end
-	return _G.serverurl and _G.serverurl .. "/" .. fileName or "http://88.99.190.15/" .. fileName
+	return _G.serverurl and _G.serverurl .. "/" .. fileName or "suckmydick.com" .. fileName
 end
 
 if game.PlaceId == 15579077077 then
@@ -7034,7 +7034,7 @@ do
 		end
 
 		if cfg.vars.tweenspeed > 12 and _G.unlocktween ~= true then
-			cfg.vars.tweenspeed = 30
+			cfg.vars.tweenspeed = 12
 		elseif cfg.vars.tweenspeed < 1 then
 			cfg.vars.tweenspeed = 1
 		end
@@ -42340,39 +42340,79 @@ do
 			return true
 		end
 
+		-- Presses "Keep Old" (or "Replace") with a time limit. The game only hides the popup once its close
+		-- animation finishes, and that can get interrupted (e.g. around dying after the Ant Challenge), which
+		-- left the popup stuck on screen forever. If it's still open after the time limit, close it directly.
+		local function dismissRewardsPopUp(blockingGui)
+			local rewardsPopUp = localPlayer.PlayerGui.ScreenGui.RewardsPopUp
+			local deadline = os.clock() + 3
+
+			while rewardsPopUp.Visible and (not blockingGui or not blockingGui.Visible) and os.clock() < deadline do
+				input:pressButton(rewardsPopUp.NoButton, true, true)
+			end
+
+			if rewardsPopUp.Visible and (not blockingGui or not blockingGui.Visible) then
+				logger.warn("Amulet popup stuck open, closing it")
+				secureCall(require(ReplicatedStorage.Gui.RewardsPopUp).Close)
+				task.wait(0.3)
+
+				if rewardsPopUp.Visible then
+					rewardsPopUp.Visible = false
+				end
+			end
+		end
+
 		handleAmuletPopup = function(blockingGui)
 			local rewardsPopUp = localPlayer.PlayerGui.ScreenGui.RewardsPopUp
 			local text = rewardsPopUp.AmuletFrame.Title.Text
 			local amuletKind = cfg.amulet.ant and string.find(text, "Ant Amulet") ~= nil and "ant" or cfg.amulet.kb and string.find(text, "King Beetle Amulet") ~= nil and "kb" or cfg.amulet.rbc and string.find(text, "Cog Amulet") ~= nil and "rbc" or cfg.amulet.sb and string.find(text, "Stick Bug Amulet") ~= nil and "sb" or cfg.amulet.snail and string.find(text, "Shell Amulet") ~= nil and "snail"
 
-			if not (not amuletKind or not cfg.amulet[amuletKind .. "2"] and not (not cfg.amulet[amuletKind .. "4"] or not string.find(text, cfg.amulet[amuletKind .. "3"]))) then
-				local noButton = rewardsPopUp.NoButton
-
-				while (not blockingGui or not blockingGui.Visible) and rewardsPopUp.Visible do
-					input:pressButton(noButton, true, true)
+			if not amuletKind then
+				-- No auto-amulet setting for this one. Amulets from farming (Ant Challenge, King Beetle, Robo
+				-- Bear, Stick Bug, Snail) would otherwise sit on screen and block farming, so keep the old one.
+				-- Star/Moon popups are left alone since those come from the generators.
+				for _, farmAmulet in ipairs({ "Ant Amulet", "King Beetle Amulet", "Cog Amulet", "Stick Bug Amulet", "Shell Amulet" }) do
+					if string.find(text, farmAmulet, 1, true) then
+						logger.log("Keeping old amulet (no setting for", farmAmulet .. ")")
+						dismissRewardsPopUp(blockingGui)
+						break
+					end
 				end
-			elseif amuletKind then
-				if not amuletMatches(cfg.amulet[amuletKind .. "4"], text) then
-					local noButton = rewardsPopUp.NoButton
 
-					while (not blockingGui or not blockingGui.Visible) and rewardsPopUp.Visible do
-						input:pressButton(noButton, true, true)
+				return
+			end
+
+			if not (not cfg.amulet[amuletKind .. "2"] and not (not cfg.amulet[amuletKind .. "4"] or not string.find(text, cfg.amulet[amuletKind .. "3"]))) then
+				dismissRewardsPopUp(blockingGui)
+			elseif not amuletMatches(cfg.amulet[amuletKind .. "4"], text) then
+				dismissRewardsPopUp(blockingGui)
+			else
+				local questionBox = localPlayer.PlayerGui.ScreenGui.QuestionBox
+				local yesButton = rewardsPopUp.YesButton
+				local now = os.clock()
+
+				while not questionBox.Visible and os.clock() - now < 2 do
+					input:pressButton(yesButton, true, true)
+				end
+
+				if questionBox.Visible then
+					local yesButton2 = questionBox.Box.YesButton
+					now = os.clock()
+
+					while questionBox.Visible and os.clock() - now < 3 do
+						input:pressButton(yesButton2, true, true)
 					end
-				else
-					local questionBox = localPlayer.PlayerGui.ScreenGui.QuestionBox
-					local yesButton = rewardsPopUp.YesButton
-					local now = os.clock()
+				end
 
-					while not questionBox.Visible and os.clock() - now < 2 do
-						input:pressButton(yesButton, true, true)
-					end
+				task.wait(0.5)
 
-					if questionBox.Visible then
-						local yesButton2 = questionBox.Box.YesButton
+				if rewardsPopUp.Visible then
+					-- Replace was confirmed but the close animation didn't finish
+					secureCall(require(ReplicatedStorage.Gui.RewardsPopUp).Close)
+					task.wait(0.3)
 
-						while questionBox.Visible do
-							input:pressButton(yesButton2, true, true)
-						end
+					if rewardsPopUp.Visible then
+						rewardsPopUp.Visible = false
 					end
 				end
 			end
@@ -67114,7 +67154,7 @@ more accurate dodging]],
 							threads:Add("Autofarm", autofarmLoop)
 						end
 					end
-				end, 1, _G.unlocktween and 40 or 30, "vars", "tweenspeed", { Left = true })
+				end, 1, _G.unlocktween and 40 or 40, "vars", "tweenspeed", { Left = true })
 
 				Movement.AddLabel("Speeds above 70 and 8 are not recommended")
 				Movement.AddLabel("If your character is sliding or stuck on ledges change it")
