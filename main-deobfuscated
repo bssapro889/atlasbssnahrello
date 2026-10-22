@@ -7059,8 +7059,8 @@ do
 			error("return", 0)
 		end
 
-		if cfg.vars.tweenspeed > 12 and _G.unlocktween ~= true then
-			cfg.vars.tweenspeed = 12
+		if cfg.vars.tweenspeed > 40 and _G.unlocktween ~= true then
+			cfg.vars.tweenspeed = 40
 		elseif cfg.vars.tweenspeed < 1 then
 			cfg.vars.tweenspeed = 1
 		end
@@ -59476,6 +59476,12 @@ do
 			local dialog = gameGui.Dialog
 			local OnettWithStickers, imageLabel
 
+			questData.claimcooldown = questData.claimcooldown or {}
+
+			if questData.claimcooldown[label] and os.clock() < questData.claimcooldown[label] then
+				return
+			end
+
 			if label ~= "Onett" then
 				OnettWithStickers = workspace.NPCs[label]
 				imageLabel = OnettWithStickers.Platform.AlertPos.AlertGui.ImageLabel
@@ -59520,8 +59526,23 @@ do
 
 				if exitTo ~= 1 then
 					logger.warn("Failed to open", label, "dialog")
+					questData.claimcooldown[label] = os.clock() + 60
 					return
 				end
+
+				if v134 >= 3 and (imageLabel.ImageTransparency == 0 or not (label ~= "Polar Bear" or gameApi:Cache({ "NPCs", label }))) then
+					-- Talked to them 3 times and the quest marker is still there. Usually the client's copy of
+					-- your stats has drifted from the server (e.g. 500/500 locally but 476/500 on the server),
+					-- so the quest looks done but can't be turned in. Re-download the real data from the server
+					-- (same as what a rejoin does) and give it a minute before trying this NPC again.
+					logger.warn("Auto Quest:", label, "quest won't turn in, resyncing quest data with the server")
+					gameApi:CacheUpdate()
+					questData.data = nil
+					questData.data2 = nil
+					questData.time = nil
+					questData.claimcooldown[label] = os.clock() + 60
+				end
+
 				questData.data = nil
 				questData.data2 = nil
 				questData.time = nil
@@ -67154,8 +67175,8 @@ more accurate dodging]],
 					cfg.vars.walkspeed = 90
 				end
 
-				if cfg.vars.tweenspeed > 12 and _G.unlocktween ~= true then
-					cfg.vars.tweenspeed = 12
+				if cfg.vars.tweenspeed > 40 and _G.unlocktween ~= true then
+					cfg.vars.tweenspeed = 40
 				end
 
 				Movement.AddSwitch("Enable Walk Speed", function(enabled)
