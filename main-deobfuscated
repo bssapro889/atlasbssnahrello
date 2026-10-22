@@ -1029,6 +1029,20 @@ end
 stopMovement = function()
 	local humanoid = getHumanoid()
 
+	-- Always drop the per-frame noclip connection and the gyro, even when the character is dead.
+	-- Before, a death mid-tween left the connection running every frame forever (memory + lag).
+	if state.tweennoclip then
+		state.tweennoclip:Disconnect()
+		state.tweennoclip = nil
+	end
+
+	if state.gyro and (humanoid.Health == 0 or not state.gyro.Parent) then
+		pcall(function()
+			state.gyro:Destroy()
+		end)
+		state.gyro = nil
+	end
+
 	if humanoid.health ~= 0 then
 		local rootPart = getRootPart()
 		humanoid:MoveTo(rootPart.Position)
@@ -1057,7 +1071,9 @@ stopMovement = function()
 	end
 end
 
-local threads = { list = {} }
+-- Weak values: finished threads (every secureCall, every token/bubble/flame timer) used to stay in this
+-- list forever and were the main memory leak. Running/scheduled threads are still held by the engine.
+local threads = { list = setmetatable({}, { __mode = "v" }) }
 local connections = { list = {} }
 
 gameApi.SetupSecureCall = function()
@@ -1066,8 +1082,9 @@ gameApi.SetupSecureCall = function()
 			local Z, p
 			local q
 			threadCount += 1
+			local callId = threadCount
 
-			threads.list[threadCount] = task.spawn(function(...)
+			threads.list[callId] = task.spawn(function(...)
 				setthreadidentity(5)
 
 				Z, p = pcall(function(...)
@@ -1080,6 +1097,8 @@ gameApi.SetupSecureCall = function()
 			while not q do
 				task.wait()
 			end
+
+			threads.list[callId] = nil
 
 			if not Z then
 				error(p)
@@ -1361,7 +1380,14 @@ threads.Add = function(manager, threadId, callback)
 end
 
 threads.Get = function(manager, threadId)
-	return manager.list[threadId]
+	local thread = manager.list[threadId]
+
+	if thread and coroutine.status(thread) == "dead" then
+		manager.list[threadId] = nil
+		return nil
+	end
+
+	return thread
 end
 
 threads.Cancel = function(manager, threadId)
@@ -7058,10 +7084,32 @@ do
 		AlignOrientation.Parent = rootPart
 		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 
+		if state.tweennoclip then
+			state.tweennoclip:Disconnect()
+			state.tweennoclip = nil
+		end
+
+		-- Cache the character's parts and refresh every 10 frames instead of building a new
+		-- GetDescendants() table every single frame.
+		local noclipParts = nil
+		local noclipFrame = 0
+
 		state.tweennoclip = RunService.PreSimulation:Connect(function()
-			for n, n in ipairs(character:GetDescendants()) do
-				if n:IsA("BasePart") and n.CanCollide then
-					n.CanCollide = false
+			noclipFrame += 1
+
+			if not noclipParts or noclipFrame % 10 == 0 then
+				noclipParts = {}
+
+				for _, descendant in ipairs(character:GetDescendants()) do
+					if descendant:IsA("BasePart") then
+						table.insert(noclipParts, descendant)
+					end
+				end
+			end
+
+			for _, part in ipairs(noclipParts) do
+				if part.CanCollide then
+					part.CanCollide = false
 				end
 			end
 		end)
@@ -45411,9 +45459,21 @@ Content-Disposition: form-data; name="file[0]"; filename="image.png"
 		end))
 
 		connections:Add("char", localPlayer.CharacterAdded:Connect(function()
-			threadCount += 1
+			-- Leftovers from the previous character
+			if state.tweennoclip then
+				state.tweennoclip:Disconnect()
+				state.tweennoclip = nil
+			end
 
-			connections:Add(threadCount, getHumanoid().Died:Connect(function()
+			if state.gyro then
+				pcall(function()
+					state.gyro:Destroy()
+				end)
+				state.gyro = nil
+			end
+
+			connections:Cancel("chardied")
+			connections:Add("chardied", getHumanoid().Died:Connect(function()
 				farmState.field = nil
 			end))
 		end))
@@ -68057,22 +68117,37 @@ Are you sure you want to enable it?]])
 				end, "antilag", "norender")
 
 				antiLagFolder.AddSwitch("Hide Other Players", function(n)
-					if n and not connections:Get("antilagplayers") then
-						for n, n in game.Players:GetPlayers() do
-							if n ~= localPlayer then
-								n.Character:Destroy()
-							end
+					local function hidePlayer(player)
+						if player == localPlayer then
+							return
 						end
 
-						connections:Add("antilagplayers", game.Players.PlayerAdded:Connect(function(n)
-							if n ~= localPlayer then
-								threadCount += 1
+						if player.Character then
+							player.Character:Destroy()
+						end
 
-								connections:Add(threadCount, n.CharacterAdded:Connect(function(n)
-									n:Destroy()
-								end))
-							end
+						connections:Cancel("antilagchar" .. player.UserId)
+						connections:Add("antilagchar" .. player.UserId, player.CharacterAdded:Connect(function(character)
+							character:Destroy()
 						end))
+					end
+
+					if n and not connections:Get("antilagplayers") then
+						for _, player in game.Players:GetPlayers() do
+							hidePlayer(player)
+						end
+
+						connections:Add("antilagplayers", game.Players.PlayerAdded:Connect(hidePlayer))
+						connections:Add("antilagplayers2", game.Players.PlayerRemoving:Connect(function(player)
+							connections:Cancel("antilagchar" .. player.UserId)
+						end))
+					elseif not n then
+						connections:Cancel("antilagplayers")
+						connections:Cancel("antilagplayers2")
+
+						for _, player in game.Players:GetPlayers() do
+							connections:Cancel("antilagchar" .. player.UserId)
+						end
 					end
 				end, "antilag", "players")
 
